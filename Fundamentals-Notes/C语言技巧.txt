@@ -1,0 +1,610 @@
+typedef
+EFI_STATUS
+(EFIAPI *EFI_IMAGE_LOAD) (
+  IN BOOLEAN                  BootPolicy,
+  IN EFI_HANDLE               ParentImageHandle,
+  IN EFI_DEVICE_PATH_PROTOCOL *DevicePath,
+  IN VOID                     *SourceBuffer   OPTIONAL,
+  IN UINTN                    SourceSize,
+  OUT EFI_HANDLE              *ImageHandle
+  );
+定义了一个函数指针类型，并给它起了个别名 EFI_IMAGE_LOAD。
+
+解析：
+
+EFI_STATUS (EFIAPI *EFI_IMAGE_LOAD) (参数列表);                      //类似int (*p)(int a, int b)，一个指向函数的指针
+定义了一个名为“EFI_IMAGE_LOAD“的指针变量，这个指针指向一个返回类型是 EFI_STATUS 的函数。所以本来就是一个 函数指针变量声明。
+
+typedef
+给一个数据类型取一个新的别名。
+原类型是 “有名类型”（已有名字的类型）时，原类型名不可以省略；
+// 原类型是 int（已有名字）
+typedef int MyInt;  // 给 int 起别名 MyInt，原类型名 int 不能省略
+
+// 原类型是 int*（已有名字的指针类型）
+typedef int* IntPtr;  // 给 int* 起别名 IntPtr，原类型名 int* 不能省略
+
+原类型是 “匿名类型”（没有名字的类型）时，原类型名可以省略。
+// 匿名结构体（没有原类型名），通过 typedef 赋予别名 MyStruct
+typedef struct {
+  int a;
+  char b;
+} MyStruct;  // 这里结构体本身没有名字（匿名），MyStruct 是它的第一个名字
+
+// 匿名函数指针类型（没有原类型名），通过 typedef 赋予别名 FuncPtr
+typedef int (*FuncPtr)(int, int);  // 函数指针类型本身是匿名的（由返回值和参数列表定义），FuncPtr 是它的名字
+
+
+typedef EFI_STATUS (EFIAPI *EFI_IMAGE_LOAD)(...);
+定义了一个新的类型名 EFI_IMAGE_LOAD，它代表“指向函数的指针”的类型。
+
+
+
+“接口声明 - 实现函数 - 绑定过程” 三部分，设计的逻辑和目的：
+
+一、接口声明（EFI_CONNECT_CONTROLLER 类型定义）
+
+// 接口声明：定义“连接控制器”服务的标准格式
+typedef
+EFI_STATUS
+(EFIAPI *EFI_CONNECT_CONTROLLER)(
+  IN  EFI_HANDLE                    ControllerHandle,
+  IN  EFI_HANDLE                    *DriverImageHandle    OPTIONAL,
+  IN  EFI_DEVICE_PATH_PROTOCOL      *RemainingDevicePath  OPTIONAL,
+  IN  BOOLEAN                       Recursive
+);
+
+作用：
+这是一个 “函数指针类型” 的定义，本质是制定了一个接口标准—— 规定了 “连接控制器” 这个服务必须接收哪些参数（如控制器句柄、是否递归连接等）、返回什么结果（EFI_STATUS 状态码）。它不关心具体怎么实现，只关心 “输入输出格式”。就像规定 “遥控器必须有电源键、音量键”，但不规定遥控器是塑料还是金属做的。
+
+
+二、具体实现（CoreConnectController 函数）
+
+// 具体实现：按照接口标准编写的实际逻辑
+EFI_STATUS
+EFIAPI
+CoreConnectController (
+  IN  EFI_HANDLE                    ControllerHandle,
+  IN  EFI_HANDLE                    *DriverImageHandle    OPTIONAL,
+  IN  EFI_DEVICE_PATH_PROTOCOL      *RemainingDevicePath  OPTIONAL,
+  IN  BOOLEAN                       Recursive
+)
+{
+  // 1. 查找与当前控制器匹配的驱动程序
+  // 2. 调用驱动的绑定协议完成连接
+  // 3. 如果需要递归，继续处理子设备
+  // 4. 返回操作结果（成功/失败等）
+}
+
+
+
+作用：
+这是真正 “干活” 的函数，按照 EFI_CONNECT_CONTROLLER 接口标准实现了具体逻辑（比如如何匹配驱动、如何处理子设备）。
+名字可以自定义（这里用 CoreConnectController，Core 表示 “核心服务”），但参数列表、返回值、调用约定必须和接口完全一致（否则无法被接口指针指向）。
+
+三、绑定过程（将接口与实现关联）
+
+//定义服务结构体
+typedef struct {
+  // 头部信息（签名、版本等）
+  {
+    UINT64  Signature;
+    UINT32  Revision;
+    ...
+  },
+  EFI_CONNECT_CONTROLLER                        ConnectController;
+    ...	
+} EFI_BOOT_SERVICES;
+
+
+// 实例化结构体，并绑定实现函数
+EFI_BOOT_SERVICES  mBootServices = {
+  // 头部信息（签名、版本等）
+  {
+    EFI_BOOT_SERVICES_SIGNATURE,
+    EFI_BOOT_SERVICES_REVISION,
+    ...
+  },
+  // 其他服务绑定...
+
+  (EFI_CONNECT_CONTROLLER)CoreConnectController,  // 当前省略了“.ConnectController”完整是“.ConnectController = (EFI_CONNECT_CONTROLLER)CoreConnectController”。强制类型转换绑定：接口指针指向实现函数
+
+  // 其他服务绑定...
+};
+
+作用：
+通过结构体初始化，将 mBootServices 中的 ConnectController 函数指针（接口）与 CoreConnectController 函数（实现）关联起来。
+之后，程序只需通过 mBootServices.ConnectController(...) 调用，实际执行的就是 CoreConnectController 的逻辑。
+
+
+四：实际调用
+
+写法一：
+gBS->ConnectController(ControllerHandle, ...);	//gBS是全局访问指针 （是因为代码中有，头文件中：extern EFI_BOOT_SERVICES *gBS；将全局指针指向这个实例gBS = &mBootServices;）。
+写法二：
+mBootServices.ConnectController(ControllerHandle, ...);
+
+为什么要这样设计？（“接口声明 - 具体实现 - 绑定”）
+是模块化、可扩展设计的核心思想，尤其在需要兼容不同硬件和厂商的系统中至关重要：
+
+（1）解耦 “标准” 与 “实现”：
+接口声明（EFI_CONNECT_CONTROLLER）由 UEFI 规范统一制定，所有厂商必须遵守，确保不同固件、不同硬件的兼容性（比如 Intel 和 AMD 的主板，调用 ConnectController 的方式完全一样）。
+具体实现（CoreConnectController）由厂商或开源社区编写，可根据硬件特性优化（比如某厂商的主板有特殊的设备连接逻辑，只需修改实现函数，无需修改调用方代码）。
+
+（2）方便替换实现：如果需要升级功能（比如优化驱动匹配算法），只需编写新的实现函数（如 NewConnectController），
+然后在绑定处改为 (EFI_CONNECT_CONTROLLER)NewConnectController，所有调用 ConnectController 的代码无需任何修改 —— 这就是 “面向接口编程” 的优势。
+
+（3）统一调用入口：无论底层实现如何变化，上层代码始终通过 gBS->ConnectController(...) 调用（gBS 是指向 mBootServices 的全局指针），无需关心具体是哪个函数在干活，降低了代码的耦合度。
+
+一句话总结
+这种设计就像 “电源插座”：接口声明是 “插座标准”（必须是三孔、电压 220V），具体实现是 “插座内部的铜片和线路”（不同厂商可以有不同工艺），绑定过程是 “将线路接到插座上”。最终用户只需按标准插插头（调用接口），无需关心插座内部怎么实现。
+
+
+
+有一个内存插槽坏了，把这个坏的插槽上的内存拔了，机器才能起来。
+另外三根内存进系统后，也只能识别到一根。
+
+
+
+
+#include <stdio.h>
+
+// ========== 共享的定义 ==========
+// 接口定义（两种方式都一样）
+typedef struct {
+    int (*calculate)(int a, int b);
+    char symbol;
+} Operation;
+
+// 具体实现（两种方式都一样）
+int add_impl(int a, int b) { 
+	return a + b;
+ }
+int subtract_impl(int a, int b) { 
+	return a - b;
+ }
+
+// ========== 传统方式 ==========
+// 实例化和绑定（两种方式都一样）
+
+Operation trad_add = {
+	.calculate = add_impl, 
+	.symbol = '+'
+};
+
+Operation trad_sub = {
+	.calculate = subtract_impl, 
+	.symbol = '-'
+};
+
+void traditional_calc(char op) {
+    printf("传统方式: ");
+    
+    // 【关键】直接引用全局变量
+    if (op == '+') {
+        printf("%d\n", trad_add.calculate(10, 5));
+    } else if (op == '-') {
+        printf("%d\n", trad_sub.calculate(10, 5));
+    }
+}
+
+// ========== 新方式 ==========  
+// 实例化和绑定（两种方式都一样）
+Operation modern_add = {
+	.calculate = add_impl, 
+	.symbol = '+'
+};
+Operation modern_sub = {
+	.calculate = subtract_impl, 
+	.symbol = '-'
+};
+
+// 注册表（新方式特有的）
+Operation* op_table[26] = {0};
+
+void register_op(Operation* op) {
+    op_table[op->symbol - '+'] = op;  // 注册
+}
+
+Operation* find_op(char symbol) {
+    return op_table[symbol - '+'];    // 查找
+}
+
+void modern_calc(char op) {
+    printf("新方式: ");
+    
+    // 【关键】通过查找表间接使用
+    Operation* found = find_op(op);
+    if (found != NULL) {
+        printf("%d\n", found->calculate(10, 5));
+    }
+}
+
+// ========== 主函数 ==========
+int main() {
+    // 传统方式使用
+    traditional_calc('+');
+    traditional_calc('-');
+    
+    // 新方式需要先注册
+    register_op(&modern_add);
+    register_op(&modern_sub);
+    
+    // 新方式使用
+    modern_calc('+');
+    modern_calc('-');
+    
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+我的代码是这样的，因为这个LoadImage函数的第三个参数Device Path为NULL的话，第四个参数内存启动设置为image地址的话，表示从内存启动。
+但是官方文档说 The DevicePath is optional in this
+ case. ADevicePath should still be provided since certain portions of firmware may use it to make certain security
+ policy decisions.：
+VOID
+EFIAPI
+BdsEntry (
+  IN EFI_BDS_ARCH_PROTOCOL  *This
+  )
+{
+  EFI_BOOT_MANAGER_LOAD_OPTION    *LoadOptions;
+  UINTN                           LoadOptionCount;
+  CHAR16                          *FirmwareVendor;
+  EFI_EVENT                       HotkeyTriggered;
+  UINT64                          OsIndication;
+  UINTN                           DataSize;
+  EFI_STATUS                      Status;
+  UINT32                          BootOptionSupport;
+  UINT16                          BootTimeOut;
+  EDKII_VARIABLE_POLICY_PROTOCOL  *VariablePolicy;
+  UINTN                           Index;
+  EFI_BOOT_MANAGER_LOAD_OPTION    LoadOption;
+  UINT16                          *BootNext;
+  CHAR16                          BootNextVariableName[sizeof ("Boot####")];
+  EFI_BOOT_MANAGER_LOAD_OPTION    BootManagerMenu;
+  BOOLEAN                         BootFwUi;
+  BOOLEAN                         PlatformRecovery;
+  BOOLEAN                         BootSuccess;
+  EFI_DEVICE_PATH_PROTOCOL        *FilePath;
+  EFI_STATUS                      BootManagerMenuStatus;
+  EFI_BOOT_MANAGER_LOAD_OPTION    PlatformDefaultBootOption;
+  BOOLEAN                         PlatformDefaultBootOptionValid;
+
+  HotkeyTriggered = NULL;
+  Status          = EFI_SUCCESS;
+  BootSuccess     = FALSE;
+ 
+  //
+  //Modify BEGIN: Added by zhangdi 2025-10-17
+  EFI_HANDLE                      KernelHandle;
+  UINTN                           ExitDataSize;
+  CHAR16                          *ExitData;
+  EFI_STATUS                      KernelStatus;
+  UINT64 KernelBaseAddress = 0x480000000;
+  UINT64 KernelSize        = 0xF9C000;
+  //
+  //Modify End
+
+  //
+  // Insert the performance probe
+  //
+  PERF_CROSSMODULE_END ("DXE");
+  TRACE_PRINT(" ");
+  PERF_CROSSMODULE_BEGIN ("BDS");
+  TRACE_PRINT(" ");
+  DEBUG ((DEBUG_INFO, "[Bds] Entry...\n"));
+ 
+  //
+  //Modify BEGIN: Added by zhangdi 2025-10-17
+  KernelStatus = gBS->LoadImage (
+                        FALSE,
+                        gImageHandle,           // 使用全局 ImageHandle
+                        NULL,                   // 使用内存加载
+                        (VOID *)KernelBaseAddress,    // 内核地址
+                        (UINTN)KernelSize,        // 内核大小
+                        &KernelHandle
+                        );
+ 
+  TRACE_PRINT(" ");
+  if (!EFI_ERROR (KernelStatus)) {
+    ExitDataSize = 0;
+    ExitData = NULL;
+    TRACE_PRINT(" ");
+    // 加载成功，尝试启动
+    (void)gBS->StartImage (KernelHandle, NULL, NULL);
+    TRACE_PRINT(" ");
+    //内核未能保持运行
+    DEBUG((DEBUG_ERROR, "Kernel failed to stay running, continuing original startup\n"));
+    gBS->UnloadImage(KernelHandle);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  //
+  //Modify BEGIN: Added by zhangdi 2025-10-17
+  KernelStatus = gBS->LoadImage (
+                        FALSE,
+                        gImageHandle,           // 使用全局 ImageHandle
+                        NULL,                   // 使用内存加载
+                        (VOID *)KernelBaseAddress,    // 内核地址
+                        (UINTN)KernelSize,        // 内核大小
+                        &KernelHandle
+                        );
+ 
+  TRACE_PRINT(" ");
+  if (!EFI_ERROR (KernelStatus)) {
+    ExitDataSize = 0;
+    ExitData = NULL;
+    TRACE_PRINT(" ");
+    // 加载成功，尝试启动
+    (void)gBS->StartImage (KernelHandle, NULL, NULL);
+    TRACE_PRINT(" ");
+    //内核未能保持运行
+    DEBUG((DEBUG_ERROR, "Kernel failed to stay running, continuing original startup\n"));
+    gBS->UnloadImage(KernelHandle);
+  }
+  //Modify End
+
+
+...
+return EFI_INVALID_PARAMETER;
+
+#define EFI_INVALID_PARAMETER     RETURN_INVALID_PARAMETER
+#define RETURN_INVALID_PARAMETER  ENCODE_ERROR (2)
+#define ENCODE_ERROR(StatusCode)  ((RETURN_STATUS)(MAX_BIT | (StatusCode)))
+#define MAX_BIT  0x8000000000000000ULL
+typedef UINTN RETURN_STATUS;
+
+
+
+
+UEFI的官方文档中LoadImag()支持直接从内存中加载内核：
+
+LoadImage(
+ 		  IN BOOLEAN                                                       	BootPolicy，
+                  IN EFI_Handle,                                           		ParentImageHandle，
+                  IN EFI_DEVICE_PATH_PROTOCOL                   	*DevicePath OPTIONA，
+                  IN VOID									*SourceBuffer OPTIONAL，
+                  IN UINTN								SourceSize，
+                  OUT EFI_Handle							*ImageHandle
+                  );
+当这个SourceBuffer不为空时，表示从内存加载内存，DevicePath为可选参数，但是他推荐这个DevicePath尽量还是要提供。
+
+然后我在源码中看了下这个LoadImage的调用关系：
+LoadImage底层实现函数是MdeModulePkg/Core/Dxe/Image.c中的CoreLoadImage：
+EFI_STATUS
+EFIAPI
+CoreLoadImage (
+  IN BOOLEAN                   BootPolicy,
+  IN EFI_HANDLE                ParentImageHandle,
+  IN EFI_DEVICE_PATH_PROTOCOL  *FilePath,
+  IN VOID                      *SourceBuffer   OPTIONAL,
+  IN UINTN                     SourceSize,
+  OUT EFI_HANDLE               *ImageHandle
+  )
+{
+  EFI_STATUS  Status;
+  EFI_HANDLE  Handle;
+  PERF_LOAD_IMAGE_BEGIN (NULL);
+  Status = CoreLoadImageCommon (
+             BootPolicy,
+             ParentImageHandle,
+             FilePath,
+             SourceBuffer,
+             SourceSize,
+             (EFI_PHYSICAL_ADDRESS)(UINTN)NULL,
+             NULL,
+             ImageHandle,
+             NULL,
+             EFI_LOAD_PE_IMAGE_ATTRIBUTE_RUNTIME_REGISTRATION | EFI_LOAD_PE_IMAGE_ATTRIBUTE_DEBUG_IMAGE_INFO_TABLE_REGISTRATION
+             );
+
+这个CoreLoadImageCommon也定义在Image.c中,它会调用CoreLocateDevicePath：
+
+EFI_STATUS
+CoreLoadImageCommon (
+  IN  BOOLEAN                   BootPolicy,
+  IN  EFI_HANDLE                ParentImageHandle,
+  IN  EFI_DEVICE_PATH_PROTOCOL  *FilePath,
+  IN  VOID                      *SourceBuffer       OPTIONAL,
+  IN  UINTN                     SourceSize,
+  IN  EFI_PHYSICAL_ADDRESS      DstBuffer           OPTIONAL,
+  IN OUT UINTN                  *NumberOfPages      OPTIONAL,
+  OUT EFI_HANDLE                *ImageHandle,
+  OUT EFI_PHYSICAL_ADDRESS      *EntryPoint         OPTIONAL,
+  IN  UINT32                    Attribute
+  )
+{
+  LOADED_IMAGE_PRIVATE_DATA  *Image;
+  LOADED_IMAGE_PRIVATE_DATA  *ParentImage;
+  IMAGE_FILE_HANDLE          FHand;
+  EFI_STATUS                 Status;
+  EFI_STATUS                 SecurityStatus;
+  EFI_HANDLE                 DeviceHandle;
+  UINT32                     AuthenticationStatus;
+  EFI_DEVICE_PATH_PROTOCOL   *OriginalFilePath;
+  EFI_DEVICE_PATH_PROTOCOL   *HandleFilePath;
+  EFI_DEVICE_PATH_PROTOCOL   *InputFilePath;
+  EFI_DEVICE_PATH_PROTOCOL   *Node;
+  UINTN                      FilePathSize;
+  BOOLEAN                    ImageIsFromFv;
+  BOOLEAN                    ImageIsFromLoadFile;
+
+  SecurityStatus = EFI_SUCCESS;
+
+  ASSERT (gEfiCurrentTpl < TPL_NOTIFY);
+  ParentImage = NULL;
+
+  //
+  // The caller must pass in a valid ParentImageHandle
+  //
+  if ((ImageHandle == NULL) || (ParentImageHandle == NULL)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ParentImage = CoreLoadedImageInfo (ParentImageHandle);
+  if (ParentImage == NULL) {
+    DEBUG ((DEBUG_LOAD|DEBUG_ERROR, "LoadImageEx: Parent handle not an image handle\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ZeroMem (&FHand, sizeof (IMAGE_FILE_HANDLE));
+  FHand.Signature      = IMAGE_FILE_HANDLE_SIGNATURE;
+  OriginalFilePath     = FilePath;
+  InputFilePath        = FilePath;
+  HandleFilePath       = FilePath;
+  DeviceHandle         = NULL;
+  Status               = EFI_SUCCESS;
+  AuthenticationStatus = 0;
+  ImageIsFromFv        = FALSE;
+  ImageIsFromLoadFile  = FALSE;
+
+  //
+  // If the caller passed a copy of the file, then just use it
+  //
+  if (SourceBuffer != NULL) {
+    FHand.Source     = SourceBuffer;
+    FHand.SourceSize = SourceSize;
+    Status           = CoreLocateDevicePath (&gEfiDevicePathProtocolGuid, &HandleFilePath, &DeviceHandle);
+......
+}
+
+这个CoreLocateDevicePath的定义在MdeModulePkg/Core/Dxe/Hand的Locate.c中：
+
+EFI_STATUS
+EFIAPI
+CoreLocateDevicePath (
+  IN EFI_GUID                      *Protocol,
+  IN OUT EFI_DEVICE_PATH_PROTOCOL  **DevicePath,
+  OUT EFI_HANDLE                   *Device
+  )
+{
+  INTN                      SourceSize;
+  INTN                      Size;
+  INTN                      BestMatch;
+  UINTN                     HandleCount;
+  UINTN                     Index;
+  EFI_STATUS                Status;
+  EFI_HANDLE                *Handles;
+  EFI_HANDLE                Handle;
+  EFI_HANDLE                BestDevice;
+  EFI_DEVICE_PATH_PROTOCOL  *SourcePath;
+  EFI_DEVICE_PATH_PROTOCOL  *TmpDevicePath;
+
+  if (Protocol == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if ((DevicePath == NULL) || (*DevicePath == NULL)) {
+    return EFI_INVALID_PARAMETER;
+  }
+  TRACE_PRINT(" ");
+  Handles       = NULL;
+  BestDevice    = NULL;
+  SourcePath    = *DevicePath;
+  TmpDevicePath = SourcePath;
+  while (!IsDevicePathEnd (TmpDevicePath)) {
+    if (IsDevicePathEndInstance (TmpDevicePath)) {
+      //
+      // If DevicePath is a multi-instance device path,
+      // the function will operate on the first instance
+      //
+      break;
+    }
+
+    TmpDevicePath = NextDevicePathNode (TmpDevicePath);
+  }
+
+  SourceSize = (UINTN)TmpDevicePath - (UINTN)SourcePath;
+
+  //
+  // Get a list of all handles that support the requested protocol
+  //
+  Status = CoreLocateHandleBuffer (ByProtocol, Protocol, NULL, &HandleCount, &Handles);
+  if (EFI_ERROR (Status) || (HandleCount == 0)) {
+    return EFI_NOT_FOUND;
+  }
+
+  BestMatch = -1;
+  for (Index = 0; Index < HandleCount; Index += 1) {
+    Handle = Handles[Index];
+    Status = CoreHandleProtocol (Handle, &gEfiDevicePathProtocolGuid, (VOID **)&TmpDevicePath);
+    if (EFI_ERROR (Status)) {
+      //
+      // If this handle doesn't support device path, then skip it
+      //
+      continue;
+    }
+
+    //
+    // Check if DevicePath is first part of SourcePath
+    //
+    Size = GetDevicePathSize (TmpDevicePath) - sizeof (EFI_DEVICE_PATH_PROTOCOL);
+    ASSERT (Size >= 0);
+    if ((Size <= SourceSize) && (CompareMem (SourcePath, TmpDevicePath, (UINTN)Size) == 0)) {
+      //
+      // If the size is equal to the best match, then we
+      // have a duplicate device path for 2 different device
+      // handles
+      //
+      ASSERT (Size != BestMatch);
+
+      //
+      // We've got a match, see if it's the best match so far
+      //
+      if (Size > BestMatch) {
+        BestMatch  = Size;
+        BestDevice = Handle;
+      }
+    }
+  }
+
+其中的
+  if ((DevicePath == NULL) || (*DevicePath == NULL)) {
+    return EFI_INVALID_PARAMETER;
+  }
+又要求不能为空。
+
+现在我确实是要从加载已经在内存中的内核，那这个LoadImag()中的这个“IN EFI_DEVICE_PATH_PROTOCOL                   	*DevicePath”
+不能为NULL，我应该怎么填什么呢？
+
+
+
+
+
+
+
+
+
+  }
+  //Modify End
